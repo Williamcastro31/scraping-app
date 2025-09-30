@@ -16,6 +16,3 @@ def start_scraping(login: str, senha: str, cd_produto: str, descricao: str, cnpj
     get_buscar
 
     return get_buscar
-
-#Chamar função para teste
-#start_scraping("elfa1", "Mudar@2024", "7897572020115", "KEYTRUDA", "00382069000127", "8383393")
