@@ -79,7 +79,7 @@ class Scraping_Cotacao:
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=False)
+                browser = p.chromium.launch(headless=True)
                 page = browser.new_page()
 
                 try:
@@ -190,3 +190,4 @@ class Scraping_Cotacao:
 
         except Exception as e:
             return {'erro_scraping': f"Erro ao iniciar Playwright: {e}"}
+
