@@ -146,9 +146,10 @@ class Scraping_Cotacao:
                     }
 
                     
-                    elemento_produto = container.get_by_text(self.descricao, exact=False)
+
                     time.sleep(2)
-                    page.wait_for_load_state("load") 
+                    page.wait_for_load_state("load")
+                    elemento_produto = container.get_by_text(self.descricao, exact=False) 
                     if elemento_produto.count() == 0:
                         return dict_erro_prod
                     elemento_produto.first.click()
@@ -193,3 +194,4 @@ class Scraping_Cotacao:
 
         except Exception as e:
             return {'erro_scraping': f"Erro ao iniciar Playwright: {e}"}
+
