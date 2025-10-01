@@ -79,7 +79,7 @@ class Scraping_Cotacao:
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
+                browser = p.chromium.launch(headless=False)
                 page = browser.new_page()
 
                 try:
@@ -122,7 +122,8 @@ class Scraping_Cotacao:
                         'descontoProgressivo': '',
                         'erro_cliente': f"Cliente não encontrado para o CNPJ informado. ({self.cnpj})"
                     }
-
+                    
+                    page.wait_for_load_state("load")            
                     # Validar cliente
                     nenhum_resultado = page.locator('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td/span')
                     if nenhum_resultado.count() > 0 and "Nenhum resultado" in nenhum_resultado.first.inner_text():
