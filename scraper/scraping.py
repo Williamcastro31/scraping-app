@@ -79,7 +79,7 @@ class Scraping_Cotacao:
 
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
+                browser = p.chromium.launch(headless=False)
                 page = browser.new_page()
 
                 try:
@@ -122,7 +122,7 @@ class Scraping_Cotacao:
                         'descontoProgressivo': '',
                         'erro_cliente': f"Cliente não encontrado para o CNPJ informado. ({self.cnpj})"
                     }
-                    
+                    #time.sleep(2)
                     page.wait_for_load_state("load")            
                     # Validar cliente
                     nenhum_resultado = page.locator('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td/span')
@@ -145,7 +145,9 @@ class Scraping_Cotacao:
                         'erro_produto': f"Produto '{self.descricao}' não encontrado no cadastro do cliente."
                     }
 
+                    
                     elemento_produto = container.get_by_text(self.descricao, exact=False)
+                    page.wait_for_load_state("load") 
                     if elemento_produto.count() == 0:
                         return dict_erro_prod
                     elemento_produto.first.click()
@@ -190,4 +192,3 @@ class Scraping_Cotacao:
 
         except Exception as e:
             return {'erro_scraping': f"Erro ao iniciar Playwright: {e}"}
-
