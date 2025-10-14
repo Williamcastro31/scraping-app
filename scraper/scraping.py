@@ -14,6 +14,7 @@ class Scraping_Cotacao:
         self.descricao = descricao
         self.cnpj = cnpj
         self.integradorald = integradorald
+        self.lista_produtos_encontrados = []
 
 
     def realizar_login(self, pgn, cp_senha, campo_login, bt_entrar, ):
@@ -45,70 +46,25 @@ class Scraping_Cotacao:
 
     def trade_fidelize(self):
 
-
-        def fechar_tutorial(pgn, locator):
-
+        def fechar_tutorial(page, locator: str):
+            """Tenta fechar tutoriais que aparecem em modal."""
+            time.sleep(1)
             try:
-
-                fechar_tutorial = pgn.locator(locator)
-                
-                fechar_tutorial.click()
-                time.sleep(2)
-
+                btn = page.locator(locator)
+                if btn.is_visible():
+                    btn.click()
+                    page.wait_for_timeout(1000)
             except Exception as e:
-
-                return f"Erro ao fechar o tutorial: {e}"
-
-
-
-
-        def encortrar_ean(pgn, cd_produto):
-
-            # Pegar todos os links "Mais informações"
-            links = pgn.locator("text=Mais informações")
-            total = links.count()
-
-            encontrado = False
-
-            for i in range(total):
-                # Recarregar os links (porque o DOM muda a cada clique/fechamento)
-                links = page.locator("text=Mais informações")
-
-                # Clicar no link i
-                links.nth(i).click()
-
-                time.sleep(2)
-
-                # Esperar modal aparecer
-                pgn.wait_for_selector('xpath=//*[@id="modal-mais-informacoes"]/div[2]')  
-
-                # Pegar todo o texto do modal
-                modal_texto = page.locator('xpath=//*[@id="modal-mais-informacoes"]/div[2]').inner_text()
-
-                # Verificar se contém o EAN procurado
-                if cd_produto in modal_texto:
-
-                    encontrado = True
-                    break  # parar o loop
-
-                # Fechar modal
-                page.locator('xpath=//*[@id="modal-mais-informacoes"]/div[1]/a').click()
-
-                # Garantir que a tela voltou
-                page.wait_for_selector("text=Mais informações")
-
-
-        
+                return f"Erro ao fechar tutorial: {e}"
 
         def transforma_dado(dado: dict) -> dict:
             """
             Transforma o dicionário original no formato desejado,
             tratando quando 'Adicional' não tiver valor.
             """
-            # Regex para capturar "quantidade = + desconto"
             pattern = r"(\d+)\s+unidades\s*=\s*\+\s*([\d.,]+%)"
-
             desconto_progressivo = []
+
             if dado.get("Adicional"):  # só entra se tiver texto
                 for qtd, desc in re.findall(pattern, dado["Adicional"]):
                     desconto_progressivo.append({
@@ -117,165 +73,226 @@ class Scraping_Cotacao:
                     })
 
             return {
-                "descricaoProduto": dado.get("Produto", ""),
+                #"descricaoProduto": dado.get("Produto", ""),
                 "desconto": dado.get("Base", ""),
                 "descontoProgressivo": desconto_progressivo
             }
+        
+
+
+        def caputar_linhas_prod(page, locator: str):
+
+            # Captura todas as linhas do tbody
+            linhas = page.locator(locator)
+
+            # Cria lista para armazenar resultados
+            resultados = []
+
+            # Percorre cada linha e captura o texto da coluna 'Descrição'
+            for i in range(linhas.count()):
+                # Ajuste o número da coluna conforme a posição da 'Descrição' (ex: 2ª coluna -> td[2])
+                descricao = linhas.nth(i).locator("td:nth-child(2)").inner_text().strip()
+
+                if self.descricao in descricao.upper():  # busca por KEYTRUDA, ignorando maiúsculas/minúsculas
+                    resultados.append(descricao)
+
+            return resultados
+        
+
+        def criar_cotacao(desc_produto):
+
+            try:
+
+                            
+                # Clicar em criar cotação
+                page.wait_for_selector('xpath=//*[@id="btn-submit"]')
+                page.click('xpath=//*[@id="btn-submit"]')
+
+
+                # Selecionar CD e avançar
+                page.wait_for_selector('xpath=//*[@id="distribuidores-disponiveis"]/li[1]/div[1]')
+                page.click('xpath=//*[@id="distribuidores-disponiveis"]/li[1]/div[1]')
+                page.click('xpath=//*[@id="btn-salvar-distribuidores"]')
+                page.wait_for_load_state("load")
+ 
+
+                # Ler tabela de descontos
+                tabela = page.locator('xpath=//*[@id="lista-produtos-tabela"]')
+                linhas = tabela.locator("tbody tr")
+
+                page.locator('xpath=//*[@id="lista-produtos-tabela"]').wait_for(state='visible')
+
+
+                if linhas.count() == 0:
+                            
+                            return dict_erro_prod
+
+                # Só o primeiro produto (já que você clicou em 1)
+                celulas = linhas.nth(0).locator("td")
+                dict_extracao = {
+                    "Produto": celulas.nth(2).inner_text().strip(),
+                    "Base": celulas.nth(4).inner_text().strip(),
+                    "Adicional": celulas.nth(5).inner_text().strip()
+                }
+
+                dict_extracao_final = transforma_dado(dict_extracao)
+                dict_extracao_final["codigoProduto"] = self.cd_produto
+                dict_extracao_final["cnpjCliente"] = self.cnpj
+                dict_extracao_final["integradorald"] = self.integradorald
+                dict_extracao_final["descricaoProduto"] = desc_produto
+
+                orderm_dict = ['codigoProduto', 'descricaoProduto', 'cnpjCliente', 'integradorald', 'desconto', 'descontoProgressivo']
+                dict_extracao_final = {key: dict_extracao_final[key] for key in orderm_dict}
+                self.lista_produtos_encontrados.append(dict_extracao_final)
+
+
+            except Exception as e:
+                print(f'Erro no fluxo principal: {e}')
+
+
 
 
 
         try:
-
             with sync_playwright() as p:
-
                 browser = p.chromium.launch(headless=True)
                 page = browser.new_page()
-                page.goto(f"https://trade.fidelize.com.br/msd/webol/index.php?r=site/login", timeout=15000)
 
-                # aceitar cookies
-                page.wait_for_load_state("load")   
-                page.click('xpath=/html/body/div[4]/div[2]/div/div[1]/div/div[2]/div/button[2]')
-                time.sleep(2)
-   
-
-                # login
                 try:
-                       
+                    # Acessar a página de login
+                    page.goto("https://trade.fidelize.com.br/msd/webol/index.php?r=site/login", timeout=20000)
+                    page.wait_for_load_state("load")
+
+                    # Aceitar cookies se aparecer
+                    try:
+                        page.locator('xpath=/html/body/div[4]/div[2]/div/div[1]/div/div[2]/div/button[2]').wait_for(state='visible')
+                        page.click('xpath=/html/body/div[4]/div[2]/div/div[1]/div/div[2]/div/button[2]', timeout=3000)
+                    except:
+                        pass
+
+                    # Login
                     campo_user = 'xpath=//*[@id="LoginForm_username"]'
                     campo_senha = 'xpath=//*[@id="LoginForm_password"]'
                     bt_entrar = 'xpath=//*[@id="login-form"]/input[5]'
-
                     self.realizar_login(page, campo_senha, campo_user, bt_entrar)
-    
-                except Exception as e:
 
-                    return {'erro_login': f"Erro ao localizar o campo de login ou senha: {e}"}
+                    # Fechar tutoriais
+                    page.locator('xpath=/html/body/div[12]/div/div[5]/a').wait_for(state='visible')
+                    fechar_tutorial(page, 'xpath=/html/body/div[12]/div/div[5]/a')
 
-                # Fechar tela de tutorial pagina principal
-                fechar_tutorial(page, 'xpath=/html/body/div[12]/div/div[5]/a')
-        
+                    # Acessar módulo de cotações
+                    page.wait_for_selector('xpath=//*[@id="nav"]/li[1]/a/span')
+                    page.click('xpath=//*[@id="nav"]/li[1]/a/span')
+                    fechar_tutorial(page, 'xpath=/html/body/div[10]/div/div[5]/a')
 
-                # Acessar o módulo de cotações
-                page.wait_for_load_state("load")
-                page.click('xpath=//*[@id="nav"]/li[1]/a/span')
+                    # Informar CNPJ
+                    campo_cnpj = page.locator('xpath=//*[@id="clientes-grid"]/table/thead/tr[2]/td[4]/input')
+                    campo_cnpj.fill(self.cnpj)
+                    campo_cnpj.press("Enter")
+                    page.wait_for_timeout(2000)
 
-
-                # Fechar tela de tutorial pagina cotações
-                fechar_tutorial(page, 'xpath=/html/body/div[10]/div/div[5]/a')
-
-                # Informar CNPJ
-                page.wait_for_load_state("load")
-                campo_cnpj = page.locator('xpath=//*[@id="clientes-grid"]/table/thead/tr[2]/td[4]/input')
-                campo_cnpj.fill(self.cnpj)
-                campo_cnpj.press("Enter")
-
-                #Pesquisar o cliente
-                # Se aparecer "Nenhum resultado encontrado" encerrar o naverador e retornar Cliente não encontrado para o cpnj informado
-                time.sleep(2)
-
-                dict_erro_cliente = {'codigoProduto': self.cd_produto, 'descricaoProduto':self.descricao ,
-                                   'cnpjCliente': self.cnpj, 'integradorald': self.integradorald, 'desconto':'', 'descontoProgressivo':'', 'erro_cliente': f"Cliente não encontrado para o CNPJ informado. ({self.cnpj})"}
+                    dict_erro_cliente = [{
+                        'codigoProduto': self.cd_produto,
+                        'descricaoProduto': self.descricao,
+                        'cnpjCliente': self.cnpj,
+                        'integradorald': self.integradorald,
+                        'desconto': '',
+                        'descontoProgressivo': '',
+                        'erro_cliente': f"Cliente não encontrado para o CNPJ informado. ({self.cnpj})"
+                    }]
 
 
-                nenhum_resultado_locator = page.locator('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td/span')
-                if nenhum_resultado_locator.count() > 0:
-                    texto = nenhum_resultado_locator.first.inner_text()
-                    if texto.strip() == "Nenhum resultado encontrado.":
-                        browser.close()
+                    #time.sleep(2)
+                    page.wait_for_load_state("load")            
+                    # Validar cliente
+                    nenhum_resultado = page.locator('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td/span')
+                    if nenhum_resultado.count() > 0 and "Nenhum resultado" in nenhum_resultado.first.inner_text():
                         return dict_erro_cliente
-                else:
-                    # Alternativa: verificar diretamente nos <td>
-                    td_locators = page.locator('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td')
-                    for i in range(td_locators.count()):
-                        if td_locators.nth(i).inner_text().strip() == "Nenhum resultado encontrado.":
-                            browser.close()
-                            return dict_erro_cliente
 
-                # Clicar no cliente
-                page.click('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td[4]')
+                    # Clicar no cliente
+                    page.click('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td[4]')
+                    page.wait_for_timeout(1500)
 
-                time.sleep(2)
+                    # Procurar pela descrição do produto
+                    container = page.locator('xpath=//*[@id="body-tabelas-condicao"]/table/tbody')
 
-                # Clicar no nome produto da cotação
+
+
+                    dict_erro_prod = [{
+                        'codigoProduto': self.cd_produto,
+                        'descricaoProduto': self.descricao,
+                        'cnpjCliente': self.cnpj,
+                        'integradorald': self.integradorald,
+                        'desconto': '',
+                        'descontoProgressivo': '',
+                        'erro_produto': f"Produto '{self.descricao}' não encontrado no cadastro do cliente."
+                    }]
+
+
                 
-                # Procurar pela descrição do produto
+                    time.sleep(2)
 
-                container = page.locator('xpath=//*[@id="body-tabelas-condicao"]/table/tbody')
+                    page.wait_for_load_state("load")
+                    
+                    page.locator('xpath=//*[@id="body-tabelas-condicao"]/table/tbody').wait_for(state='visible')
 
-                dict_erro_prod = {'codigoProduto': self.cd_produto, 'descricaoProduto':self.descricao ,
-                                   'cnpjCliente': self.cnpj, 'integradorald': self.integradorald, 'desconto':'', 'descontoProgressivo':'', 'erro_produto': f"Produto '{self.descricao}' não encontrado no cadastro do cliente."}
+                    lst_prod = caputar_linhas_prod(page, 'xpath=//*[@id="body-tabelas-condicao"]/table/tbody/tr')
 
-                try:
-                    elemento_produto = container.get_by_text(self.descricao, exact=False)
-                    if elemento_produto.count() == 0:
-                        browser.close()
+                    # Se lista for igual a vazia 
+                    if len(lst_prod) == 0:
+
                         return dict_erro_prod
-                    elemento_produto.first.click()
+
+      
+                    for prod in lst_prod:
+
+                        # Se o prod estiver na pagina, clicar nele
+                        elemento_produto = container.get_by_text(prod, exact=True)
+
+                        if elemento_produto.count() > 0:
+
+                            elemento_produto.first.click()
+
+                            criar_cotacao(prod)
+
+                        else:
+
+                            # Acessar módulo de cotações
+                            page.wait_for_selector('xpath=//*[@id="nav"]/li[1]/a/span')
+                            page.click('xpath=//*[@id="nav"]/li[1]/a/span')
+                            fechar_tutorial(page, 'xpath=/html/body/div[10]/div/div[5]/a')
+
+                            # Informar CNPJ
+                            campo_cnpj = page.locator('xpath=//*[@id="clientes-grid"]/table/thead/tr[2]/td[4]/input')
+                            campo_cnpj.fill(self.cnpj)
+                            campo_cnpj.press("Enter")
+                            page.wait_for_timeout(2000)
+
+                            # Clicar no cliente
+                            page.click('xpath=//*[@id="clientes-grid"]/table/tbody/tr/td[4]')
+                            page.wait_for_timeout(1500)
+
+
+                           # clicar no elemento com a descrição de prod
+                            
+                            if elemento_produto.count() > 0:
+                                elemento_produto.first.click()
+                                criar_cotacao(prod)
+
+                    #time.sleep(10)
+
+                
+                    return self.lista_produtos_encontrados
+
                 except Exception as e:
+                    return {'erro_scraping': f"Erro no fluxo principal: {e}"}
+                    
+
+                finally:
+
                     browser.close()
 
-                    return dict_erro_prod
-
-                #-----
-
-                # Procurar pelo EAN
-                #encortrar_ean(page, self.cd_produto)
-
-                # Clicar em criar
-                time.sleep(1)
-                page.click('xpath=//*[@id="btn-submit"]')
-
-                # Selecionar o CD
-                time.sleep(1)
-                page.click('xpath=//*[@id="distribuidores-disponiveis"]/li[1]/div[1]')
-
-                # Clicar em avançar
-                time.sleep(1)
-                page.click('xpath=//*[@id="btn-salvar-distribuidores"]')
-                time.sleep(3)
-                page.wait_for_load_state("load")
-
-                ##-------------------------------------##
-
-                # Espera a tabela carregar
-                page.wait_for_load_state("load")
-
-                # Localiza a tabela
-                tabela = page.locator('xpath=//*[@id="lista-produtos-tabela"]')
-
-                # Todas as linhas do corpo
-                linhas = tabela.locator("tbody tr")
-
-                # Itera sobre as linhas
-                qtd_linhas = linhas.count()
-                for i in range(qtd_linhas):
-                    celulas = linhas.nth(i).locator("td")
-                    
-                    produto = celulas.nth(2).inner_text()   # Coluna Produto
-                    base = celulas.nth(4).inner_text()      # Coluna Base
-                    adicional = celulas.nth(5).inner_text() # Coluna Adicional
-
-                    dict_extracao = {
-                        "Produto": produto.strip(),
-                        "Base": base.strip(),
-                        "Adicional": adicional.strip()
-                    }
-
-
-                dict_extracao_final = transforma_dado(dict_extracao)
-
-                # Adicionar informações adicionais
-                dict_extracao_final["codigoProduto"] = self.cd_produto
-                dict_extracao_final["cnpjCliente"] = self.cnpj
-                dict_extracao_final["integradorald"] = self.integradorald
-
                 
-                time.sleep(2)
-                browser.close()
 
-                return dict_extracao_final
-            
         except Exception as e:
-
-            return {'erro_scraping': f"Erro ao acessar o site: {e}"}
-   
+            return {'erro_scraping': f"Erro ao iniciar Playwright: {e}"}
